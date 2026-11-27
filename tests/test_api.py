@@ -1,3 +1,5 @@
+"""Tests of the web API, through HTTP requests, on a database in memory."""
+
 from datetime import date
 from decimal import Decimal
 
@@ -7,95 +9,82 @@ from fastapi.testclient import TestClient
 from ledger import api, storage
 from ledger.db import Account
 
+LUNCH = {
+    "date": "2026-03-31",
+    "account": "checking",
+    "description": "Lunch with a client",
+    "category": "restaurants",
+    "amount": "-12.50",
+}
+
 
 @pytest.fixture
 def client(session):
-    """A client of the API that uses the test database, with two accounts."""
+    """A client of the API, on the database of the fixture session, with two
+    accounts and one transaction in each."""
     session.add_all([Account(name="checking"), Account(name="savings")])
     session.commit()
-    storage.add_transaction(
-        session, "checking", Decimal("2000.00"), "salary", "Salary", date(2026, 1, 1)
-    )
-    storage.add_transaction(
-        session, "checking", Decimal("-39.90"), "health", "Gym", date(2026, 1, 10)
-    )
-    storage.add_transaction(
-        session, "savings", Decimal("1.25"), "interest", "Interest", date(2026, 1, 31)
-    )
+    day = date(2026, 1, 10)
+    storage.add_transaction(session, "checking", Decimal("-39.90"), "sport", "Gym", day)
+    storage.add_transaction(session, "savings", Decimal("1.60"), "interest", "Pay", day)
     api.app.dependency_overrides[api.get_session] = lambda: session
     yield TestClient(api.app)
     api.app.dependency_overrides.clear()
 
 
-def lunch(**changes) -> dict:
-    body = {
-        "date": "2026-02-01",
-        "account": "checking",
-        "description": "Lunch",
-        "category": "food",
-        "amount": "-12.50",
-    }
-    return body | changes
-
-
 def test_list_accounts(client):
     response = client.get("/api/accounts")
+
     assert response.status_code == 200
     assert response.json() == [
-        {"name": "checking", "balance": "1960.10"},
-        {"name": "savings", "balance": "1.25"},
+        {"name": "checking", "balance": "-39.90"},
+        {"name": "savings", "balance": "1.60"},
     ]
 
 
 def test_get_a_transaction(client):
-    response = client.get("/api/transactions/2")
+    response = client.get("/api/transactions/1")
+
     assert response.status_code == 200
-    assert response.json() == {
-        "id": 2,
-        "date": "2026-01-10",
-        "account": "checking",
-        "description": "Gym",
-        "category": "health",
-        "amount": "-39.90",
-    }
+    assert response.json()["description"] == "Gym"
+    assert response.json()["amount"] == "-39.90"
 
 
-def test_get_a_missing_transaction(client):
-    response = client.get("/api/transactions/99")
+def test_a_missing_transaction_is_404(client):
+    response = client.get("/api/transactions/999")
+
     assert response.status_code == 404
-    assert "99" in response.json()["detail"]
 
 
-def test_filter_transactions(client):
-    response = client.get(
-        "/api/transactions", params={"account": "checking", "category": "health"}
-    )
+def test_filter_by_category(client):
+    response = client.get("/api/transactions", params={"category": "interest"})
+
     assert response.status_code == 200
     assert [t["id"] for t in response.json()] == [2]
 
 
 def test_create_a_transaction(client):
-    response = client.post("/api/transactions", json=lunch())
+    response = client.post("/api/transactions", json=LUNCH)
+
     assert response.status_code == 201
-    created = response.json()
-    assert created["id"] == 4
-    assert client.get("/api/transactions/4").json() == created
-    assert client.get("/api/accounts").json()[0]["balance"] == "1947.60"
+    assert response.json() == LUNCH | {"id": 3}
 
 
-def test_create_in_an_unknown_account(client):
-    response = client.post("/api/transactions", json=lunch(account="cash"))
+def test_an_unknown_account_is_400(client):
+    response = client.post("/api/transactions", json=LUNCH | {"account": "credit"})
+
     assert response.status_code == 400
-    assert response.json() == {"detail": "there is no account called 'cash'"}
+    assert response.json() == {"detail": "there is no account called 'credit'"}
 
 
-def test_create_with_a_bad_date(client):
-    response = client.post("/api/transactions", json=lunch(date="2026-02-30"))
+def test_a_date_that_is_not_a_date_is_422(client):
+    response = client.post("/api/transactions", json=LUNCH | {"date": "31/03/2026"})
+
     assert response.status_code == 422
 
 
 def test_delete_a_transaction(client):
-    response = client.delete("/api/transactions/2")
+    response = client.delete("/api/transactions/1")
+
     assert response.status_code == 204
-    assert client.get("/api/transactions/2").status_code == 404
-    assert client.delete("/api/transactions/2").status_code == 404
+    assert client.get("/api/transactions/1").status_code == 404

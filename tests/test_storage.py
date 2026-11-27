@@ -1,59 +1,59 @@
+"""Tests of storage, on a database in memory."""
+
 from datetime import date
 from decimal import Decimal
 
 import pytest
 
 from ledger import storage
+from ledger.db import Account
 
-CSV = """date,account,description,category,amount
-2026-01-01,checking,Salary,salary,2000.00
-2026-01-03,checking,Carrefour,groceries,-60.50
-2026-01-10,savings,Interest,interest,1.25
-"""
+DAY = date(2026, 3, 31)
 
 
 @pytest.fixture
-def db(session, tmp_path):
-    """The session, with the transactions of `CSV` imported."""
-    path = tmp_path / "transactions.csv"
-    path.write_text(CSV)
-    storage.import_csv(session, path)
+def db(session):
+    """The empty database of the fixture session, plus one account, checking."""
+    session.add(Account(name="checking"))
+    session.commit()
     return session
 
 
+def test_add_and_load_a_transaction(db):
+    storage.add_transaction(db, "checking", Decimal("-12.50"), "food", "Lunch", DAY)
+
+    [loaded] = storage.load_transactions(db)
+    assert loaded.date == DAY
+    assert loaded.account == "checking"
+    assert loaded.category == "food"
+    assert loaded.amount == Decimal("-12.50")
+
+
 def test_import_csv(session, tmp_path):
-    path = tmp_path / "transactions.csv"
-    path.write_text(CSV)
-    assert storage.import_csv(session, path) == 3
-    assert len(storage.load_transactions(session)) == 3
-
-
-def test_load_keeps_the_values(db):
-    transactions = storage.load_transactions(db)
-    assert [t.description for t in transactions] == ["Salary", "Carrefour", "Interest"]
-    assert transactions[1].amount == Decimal("-60.50")
-    assert transactions[2].account == "savings"
-
-
-def test_add_to_an_unknown_account(db):
-    with pytest.raises(ValueError, match="no account called 'cash'"):
-        storage.add_transaction(
-            db, "cash", Decimal("-5.00"), "food", "Coffee", date(2026, 1, 15)
-        )
-    assert len(storage.load_transactions(db)) == 3
-
-
-def test_add_a_fraction_of_a_cent(db):
-    with pytest.raises(ValueError, match="more than two decimals"):
-        storage.add_transaction(
-            db, "checking", Decimal("-1.005"), "food", "Gum", date(2026, 1, 15)
-        )
-    assert len(storage.load_transactions(db)) == 3
-
-
-def test_add_then_load(db):
-    added = storage.add_transaction(
-        db, "checking", Decimal("-12.50"), "food", "Lunch", date(2026, 1, 15)
+    csv_file = tmp_path / "transactions.csv"
+    csv_file.write_text(
+        "date,account,description,category,amount\n"
+        "2026-01-01,checking,Salary,salary,2000.00\n"
+        "2026-01-02,checking,Carrefour,groceries,-65.15\n"
+        "2026-01-15,savings,Transfer from checking,transfer,300.00\n"
     )
-    assert added.id is not None
-    assert storage.load_transactions(db)[-1] == added
+
+    count = storage.import_csv(session, csv_file)
+
+    assert count == 3
+    amounts = [t.amount for t in storage.load_transactions(session)]
+    assert amounts == [Decimal("2000.00"), Decimal("-65.15"), Decimal("300.00")]
+
+
+def test_an_unknown_account_is_refused(db):
+    with pytest.raises(ValueError, match="there is no account called 'credit'"):
+        storage.add_transaction(db, "credit", Decimal("-12.50"), "food", "Lunch", DAY)
+
+    assert storage.load_transactions(db) == []
+
+
+def test_a_fraction_of_a_cent_is_refused(db):
+    with pytest.raises(ValueError, match="more than two decimals"):
+        storage.add_transaction(db, "checking", Decimal("-1.005"), "food", "Gum", DAY)
+
+    assert storage.load_transactions(db) == []
