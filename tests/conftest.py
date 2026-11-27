@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+"""Fixtures shared by all the tests."""
 
 import pytest
 from sqlalchemy import create_engine
@@ -9,8 +9,8 @@ from ledger.db import Base
 
 
 @pytest.fixture
-def session() -> Iterator[Session]:
-    """A session on a new, empty database in memory, one per test."""
+def session():
+    """An empty database in memory, new for each test."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -19,4 +19,3 @@ def session() -> Iterator[Session]:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         yield session
-    engine.dispose()
