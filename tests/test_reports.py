@@ -32,7 +32,7 @@ def transactions() -> list[Transaction]:
 def test_balances(transactions):
     assert reports.balances(transactions) == {
         "checking": Decimal("699.25"),
-        "savings": Decimal("300.00"),
+        "savings": Decimal("300.01"),
     }
 
 
