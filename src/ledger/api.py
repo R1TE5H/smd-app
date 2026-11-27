@@ -92,7 +92,9 @@ def create_transaction(session: SessionDep, new: NewTransaction) -> TransactionO
     return TransactionOut.model_validate(transaction, from_attributes=True)
 
 
-@app.delete("/api/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/api/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_transaction(session: SessionDep, transaction_id: int) -> None:
     if not storage.delete_transaction(session, transaction_id):
         raise HTTPException(
